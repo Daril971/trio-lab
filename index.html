@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Trio Lab - Toi + Meta AI + Claude</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&display=swap">
+<style>
+:root{--bg:#f3efe6;--card:#fffdf8;--ink:#1d2a2a;--mute:#66736f;--line:#ddd6c6;
+--toi:#d6336c;--meta:#0084ff;--claude:#d97706;--lagon:#0f766e}
+@media (prefers-color-scheme:dark){:root{--bg:#10201f;--card:#172a29;--ink:#eef3ef;--mute:#9bb0aa;--line:#2b4543}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:20px 16px 48px}
+main{max-width:680px;margin:auto}
+h1,h2{font-family:'Bricolage Grotesque',system-ui,sans-serif;margin:0}
+h1{font-size:2.2rem;font-weight:800;letter-spacing:-.02em}
+h2{font-size:1.25rem;margin:28px 0 10px}
+.sub{color:var(--mute);margin:4px 0 16px}
+.me{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.me button{border:2px solid var(--c);background:transparent;color:var(--c);border-radius:99px;padding:3px 14px;font-weight:600}
+.me button[aria-pressed=true]{background:var(--c);color:#fff}
+form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px}
+input,textarea,button{font:inherit;color:inherit}
+input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+button{cursor:pointer;border:0;border-radius:8px;padding:10px 14px;background:var(--lagon);color:#fff;font-weight:600}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--claude);outline-offset:2px}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.filters button{padding:6px 12px;font-size:.9rem}
+.filters button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+li{background:var(--card);border:1px solid var(--line);border-left-width:5px;border-radius:12px;padding:12px 14px;display:grid;gap:4px}
+li.toi{border-left-color:var(--toi)}li.meta{border-left-color:var(--meta)}li.claude{border-left-color:var(--claude)}
+li p{margin:0;font-weight:500}
+.info{color:var(--mute);font-size:.85rem}
+.act{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.act button{padding:4px 10px;font-size:.85rem}
+.vote[aria-pressed=true]{background:var(--lagon);color:#fff;border-color:var(--lagon)}
+.empty{color:var(--mute);padding:16px;border:1px dashed var(--line);border-radius:12px}
+.sync{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.sync p{margin:0 0 10px}
+.qr{background:#fff;padding:12px;border-radius:12px;display:inline-block;margin-bottom:10px}
+.qr:empty{display:none}
+details{margin-top:12px}summary{cursor:pointer;color:var(--mute)}
+details textarea{height:100px;margin:8px 0;font:.8rem monospace}
+@media (prefers-reduced-motion:no-preference){li{animation:in .25s ease-out}@keyframes in{from{opacity:0;transform:translateY(4px)}}}
+</style>
+</head>
+<body>
+<main>
+<h1>🧪 Trio Lab</h1>
+<p class="sub">Notre QG à trois, depuis la Guadeloupe.</p>
+<div class="me" id="me" role="group" aria-label="Je suis"></div>
+
+<h2>Boîte à idées</h2>
+<form id="f">
+  <input id="txt" placeholder="Une idée pour le labo..." maxlength="140" required aria-label="Idée">
+  <button>Ajouter l'idée</button>
+</form>
+
+<h2>Idées du trio</h2>
+<div class="filters" id="filters"></div>
+<ul id="list"></ul>
+
+<h2>Synchroniser</h2>
+<div class="sync">
+  <p>Envoie ce lien (ou fais scanner le QR code) aux autres : en l'ouvrant, leurs idées, votes et statuts sont fusionnés avec les tiens.</p>
+  <div class="row">
+    <button id="link" type="button">Copier le lien de partage</button>
+    <button class="ghost" id="qrb" type="button">Afficher le QR code</button>
+  </div>
+  <div class="qr" id="qr"></div>
+  <p class="info" id="msg" role="status"></p>
+  <details>
+    <summary>Texte brut (JSON)</summary>
+    <textarea id="box" aria-label="Données JSON"></textarea>
+    <button class="ghost" id="imp" type="button">Fusionner ce texte</button>
+  </details>
+</div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const STATUS=["À creuser","En cours","Fait"];
+const NAMES={toi:"Toi",meta:"Meta AI",claude:"Claude"};
+const COLORS={toi:"var(--toi)",meta:"var(--meta)",claude:"var(--claude)"};
+const $=id=>document.getElementById(id);
+let filter="Tout", me=get("trio-lab-me","toi"), ideas=loadIdeas();
+
+function get(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}}
+function put(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function norm(x){
+  if(!x||!x.id||typeof x.t!=="string"||!NAMES[x.w])return null;
+  return {id:String(x.id),t:x.t.slice(0,140),w:x.w,
+    votes:[...new Set((Array.isArray(x.votes)?x.votes:[]).filter(v=>NAMES[v]))],
+    s:STATUS[x.s]?x.s:0,u:+x.u||0,d:!!x.d};
+}
+function loadIdeas(){
+  // reprend aussi les idées de la V2 si elles existent
+  const raw=get("trio-lab-v3",null)||get("trio-lab-ideas",[]);
+  const list=raw.map(norm).filter(Boolean);
+  if(list.length)return list;
+  return [{id:"seed1",t:"Choisir un premier vrai projet à construire ensemble",w:"claude",votes:[],s:0,u:0,d:false}];
+}
+function save(){put("trio-lab-v3",ideas)}
+
+// Fusion : les votes s'additionnent, le statut et la suppression suivent la modification la plus récente
+function merge(incoming){
+  let n=0;
+  incoming.map(norm).filter(Boolean).forEach(x=>{
+    const c=ideas.find(i=>i.id===x.id);
+    if(!c){ideas.push(x);n++;return}
+    const merged=[...new Set([...c.votes,...x.votes])];
+    let changed=merged.length>c.votes.length;
+    c.votes=merged;
+    if(x.u>c.u){c.s=x.s;c.d=x.d;c.u=x.u;changed=true}
+    if(changed)n++;
+  });
+  return n;
+}
+
+// Format compact pour que le lien (et le QR code) reste court
+const WK={t:"toi",m:"meta",c:"claude"},WI={toi:"t",meta:"m",claude:"c"};
+function pack(l){return l.map(i=>[i.id,i.t,WI[i.w],i.votes.map(v=>WI[v]).join(""),i.s,i.u.toString(36),i.d?1:0])}
+function unpack(a){return a.map(x=>Array.isArray(x)?{id:x[0],t:x[1],w:WK[x[2]],votes:[...(x[3]||"")].map(c=>WK[c]).filter(Boolean),s:x[4],u:parseInt(x[5],36)||0,d:!!x[6]}:x)}
+function shareUrl(){return location.href.split("#")[0]+"#d="+btoa(unescape(encodeURIComponent(JSON.stringify(pack(ideas)))))}
+
+function render(){
+  $("me").innerHTML='<span class="info">Je suis :</span>'+Object.keys(NAMES).map(k=>
+    `<button style="--c:${COLORS[k]}" aria-pressed="${k===me}" data-me="${k}">${NAMES[k]}</button>`).join("");
+  $("filters").innerHTML=["Tout",...STATUS].map(s=>
+    `<button class="ghost" aria-pressed="${s===filter}" data-f="${s}">${s}</button>`).join("");
+  const shown=ideas.filter(i=>!i.d&&(filter==="Tout"||STATUS[i.s]===filter))
+    .sort((a,b)=>b.votes.length-a.votes.length);
+  $("list").innerHTML=shown.length?shown.map(i=>{
+    const mine=i.votes.includes(me);
+    return `<li class="${i.w}">
+      <p></p>
+      <span class="info">Proposée par ${NAMES[i.w]}${i.votes.length?" · votes : "+i.votes.map(v=>NAMES[v]).join(", "):""}</span>
+      <div class="act">
+        <button class="ghost vote" data-a="vote" data-id="${i.id}" aria-pressed="${mine}" ${mine?"disabled":""}>${mine?"Voté":"Voter"} · ${i.votes.length}/3</button>
+        <button class="ghost" data-a="status" data-id="${i.id}">${STATUS[i.s]}</button>
+        <button class="ghost" data-a="del" data-id="${i.id}">Supprimer</button>
+      </div></li>`}).join(""):`<div class="empty">Aucune idée ici. Ajoute la première avec le formulaire.</div>`;
+  [...$("list").querySelectorAll("li")].forEach((li,n)=>li.querySelector("p").textContent=shown[n].t);
+  $("box").value=JSON.stringify(ideas);
+}
+
+$("me").onclick=e=>{if(e.target.dataset.me){me=e.target.dataset.me;put("trio-lab-me",me);render()}};
+$("filters").onclick=e=>{if(e.target.dataset.f){filter=e.target.dataset.f;render()}};
+$("f").onsubmit=e=>{
+  e.preventDefault();
+  const t=$("txt").value.trim();if(!t)return;
+  ideas.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),t,w:me,votes:[],s:0,u:Date.now(),d:false});
+  $("txt").value="";save();render();
+};
+$("list").onclick=e=>{
+  const {a,id}=e.target.dataset;if(!a)return;
+  const i=ideas.find(x=>x.id===id);
+  if(a==="vote"&&!i.votes.includes(me))i.votes.push(me);
+  if(a==="status"){i.s=(i.s+1)%STATUS.length;i.u=Date.now()}
+  if(a==="del"){i.d=true;i.u=Date.now()}
+  save();render();
+};
+
+$("link").onclick=async()=>{
+  const url=shareUrl();
+  try{await navigator.clipboard.writeText(url);$("msg").textContent="Lien copié. Colle-le dans WhatsApp ou une discussion."}
+  catch(e){$("box").value=url;$("box").select();$("msg").textContent="Copie le lien affiché dans la zone de texte ci-dessous."}
+};
+$("imp").onclick=()=>{
+  try{
+    const inc=JSON.parse($("box").value);
+    if(!Array.isArray(inc))throw 0;
+    const n=merge(unpack(inc));save();render();$("msg").textContent=n+" changement(s) fusionné(s).";
+  }catch(e){$("msg").textContent="Format invalide : colle une liste JSON copiée depuis le Trio Lab."}
+};
+
+$("qrb").onclick=()=>{
+  const box=$("qr");box.innerHTML="";
+  if(location.protocol==="file:"){$("msg").textContent="Le QR code ne marche qu'une fois le Trio Lab en ligne (GitHub Pages).";return}
+  if(typeof QRCode==="undefined"){$("msg").textContent="QR code indisponible sans connexion. Utilise le lien de partage.";return}
+  const url=shareUrl();
+  if(url.length>1200){$("msg").textContent="Trop d'idées pour un QR code lisible. Utilise le lien de partage.";return}
+  new QRCode(box,{text:url,width:240,height:240,correctLevel:QRCode.CorrectLevel.L});
+  $("msg").textContent="Scanne avec l'appareil photo : les idées se fusionnent à l'ouverture.";
+};
+
+// Ouverture d'un lien de partage : fusion automatique
+if(location.hash.startsWith("#d=")){
+  try{
+    const n=merge(unpack(JSON.parse(decodeURIComponent(escape(atob(location.hash.slice(3)))))));
+    save();$("msg").textContent=n+" changement(s) reçu(s) via le lien.";
+  }catch(e){$("msg").textContent="Lien de partage illisible."}
+  history.replaceState(null,"",location.pathname+location.search);
+}
+render();
+</script>
+</body>
+</html>
